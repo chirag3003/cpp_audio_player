@@ -7,6 +7,9 @@
 #include <csignal>
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
+#include <vector>
+#include <string>
 
 using namespace std;
 
@@ -16,30 +19,39 @@ condition_variable cv;
 mutex mtx;
 
 // Function to display the current timestamp
-void displayTimestamp(Mix_Music* music) {
+void displayTimestamp(Mix_Music *music)
+{
     int duration = Mix_MusicDuration(music);
     int position;
-    while (!stopMusic) {
+    while (!stopMusic)
+    {
         position = Mix_GetMusicPosition(music);
-        if (position == -1) {
-            break;  // Music has stopped playing
+        if (position == -1)
+        {
+            break; // Music has stopped playing
         }
         // cout << "Playtime : " << position << " / " << duration << " seconds" << endl;
         cout << "Press 'p' to pause/resume, 's' to stop" << endl;
         // Display the progress bar
         int progress = (position * 100) / duration;
         cout << "[";
-        for (int i = 0; i < 50; i++) {
-            if (i < progress / 2) {
+        for (int i = 0; i < 50; i++)
+        {
+            if (i < progress / 2)
+            {
                 cout << "=";
-            } else if (i == progress / 2) {
+            }
+            else if (i == progress / 2)
+            {
                 cout << ">";
-            } else {
+            }
+            else
+            {
                 cout << " ";
             }
         }
         cout << "] " << progress << "%" << endl;
-        
+
         // Create a delay of 1 second
         this_thread::sleep_for(chrono::seconds(1));
 
@@ -50,63 +62,109 @@ void displayTimestamp(Mix_Music* music) {
 }
 
 // Function to handle pause, resume, and stop
-void handleInput() {
+void handleInput()
+{
     char input;
-    while (true) {
+    while (true)
+    {
         cin >> input;
-        switch (input) {
-            case 'p':
-                if (Mix_PausedMusic()) {
-                    Mix_ResumeMusic();
-                } else {
-                    Mix_PauseMusic();
-                }
-                break;
-            case 's':
-                stopMusic = true;
-                Mix_HaltMusic();
-                return;
+        switch (input)
+        {
+        case 'p':
+            if (Mix_PausedMusic())
+            {
+                Mix_ResumeMusic();
+            }
+            else
+            {
+                Mix_PauseMusic();
+            }
+            break;
+        case 's':
+            stopMusic = true;
+            Mix_HaltMusic();
+            return;
 
-            case 'r':
-                Mix_RewindMusic();
-                break;
+        case 'r':
+            Mix_RewindMusic();
+            break;
 
-            case 'q':
-                stopMusic = true;
-                Mix_HaltMusic();
-                return;
-                            
-            default:
-                break;
+        case 'q':
+            stopMusic = true;
+            Mix_HaltMusic();
+            return;
+
+        default:
+            break;
         }
     }
 }
 
-int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        cerr << "Usage: " << argv[0] << " <music_filename>" << endl;
+vector<string> fetchMusicList(string folderPath)
+{
+    vector<string> musicFiles;
+    for (const auto &entry : filesystem::directory_iterator(folderPath))
+    {
+        if (entry.is_regular_file())
+        {
+            string filePath = entry.path().string();
+            // Check if the file is a music file (e.g., .mp3, .wav)
+            if (filePath.find(".mp3") != string::npos || filePath.find(".wav") != string::npos)
+            {
+                musicFiles.push_back(filePath);
+            }
+        }
+    }
+    return musicFiles;
+}
+
+void printMusicList(vector<string> musicFiles)
+{
+    cout << "Music Options: " << endl;
+    for (int i = 0; i < musicFiles.size(); i++)
+    {
+        cout << i << ". " << musicFiles[i] << endl;
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    auto files = fetchMusicList("musics"); // Get the music filename
+
+    printMusicList(files);
+
+    int choice = 0;
+
+    cout << "Enter the number of the music file you want to play: ";
+    cin >> choice;
+
+    if (choice < 0 || choice >= files.size())
+    {
+        cerr << "Invalid choice. Exiting." << endl;
         return 1;
     }
 
-    // Get the music filename
-    auto music_filename = argv[1];
+    auto filename = files[choice];
 
     // Initialize SDL
-    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+    if (SDL_Init(SDL_INIT_AUDIO) < 0)
+    {
         cerr << "SDL_Init failed: " << SDL_GetError() << endl;
         return 1;
     }
 
     // Initialize SDL_mixer
-    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
+    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0)
+    {
         cerr << "Mix_OpenAudio failed: " << Mix_GetError() << endl;
         SDL_Quit();
         return 1;
     }
 
     // Load the MP3 file
-    Mix_Music* music = Mix_LoadMUS(music_filename);
-    if (!music) {
+    Mix_Music *music = Mix_LoadMUS(filename.c_str());
+    if (!music)
+    {
         cerr << "Mix_LoadMUS failed: " << Mix_GetError() << endl;
         Mix_CloseAudio();
         SDL_Quit();
@@ -114,7 +172,8 @@ int main(int argc, char* argv[]) {
     }
 
     // Play the music
-    if (Mix_PlayMusic(music, 1) == -1) {
+    if (Mix_PlayMusic(music, 1) == -1)
+    {
         cerr << "Mix_PlayMusic failed: " << Mix_GetError() << endl;
         Mix_FreeMusic(music);
         Mix_CloseAudio();
@@ -131,7 +190,8 @@ int main(int argc, char* argv[]) {
     // Wait for the music to finish playing or for stop signal
     {
         unique_lock<mutex> lk(mtx);
-        cv.wait(lk, []{ return stopMusic.load(); });
+        cv.wait(lk, []
+                { return stopMusic.load(); });
     }
 
     // Clean up
