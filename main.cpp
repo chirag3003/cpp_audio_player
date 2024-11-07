@@ -54,7 +54,6 @@ public:
 
 class Music
 {
-
 public:
     string filePath;
     static void displayTimestamp(Mix_Music *music)
@@ -68,7 +67,6 @@ public:
             {
                 break; // Music has stopped playing
             }
-            // cout << "Playtime : " << position << " / " << duration << " seconds" << endl;
             cout << "Press 'p' to pause/resume, 's' to stop" << endl;
             // Display the progress bar
             int progress = (position * 100) / duration;
@@ -119,17 +117,13 @@ public:
                 break;
             case 's':
                 stopMusic = true;
+                
                 Mix_HaltMusic();
                 return;
 
             case 'r':
                 Mix_RewindMusic();
                 break;
-
-                // case 'q':
-                //     stopMusic = true;
-                //     Mix_HaltMusic();
-                //     return;
 
             default:
                 break;
@@ -210,32 +204,60 @@ public:
         inputThread.join();
     }
 };
-;
 
-class Player
+class Playlist
 {
-    MusicInput musicInput;
-    vector<string> musicFiles;
+public:
     vector<Music *> musicObjects;
 
-public:
-    Player(MusicInput &_musicInput)
+    Playlist(const vector<string> &musicFiles)
     {
-        musicInput = _musicInput;
-        musicFiles = _musicInput.musicFiles;
-        printf("musicFiles.size() = %d\n", musicFiles.size());
-        for (auto &file : musicFiles)
+        for (const auto &file : musicFiles)
         {
             musicObjects.push_back(new Music(file));
         }
     }
+
+    ~Playlist()
+    {
+        for (auto music : musicObjects)
+        {
+            delete music;
+        }
+    }
+
+    void printList()
+    {
+        cout << "Playlist: " << endl;
+        for (int i = 0; i < musicObjects.size(); i++)
+        {
+            cout << i << ". " << musicObjects[i]->getFilePath() << endl;
+        }
+    }
+
+    Music *getMusic(int index)
+    {
+        if (index < 0 || index >= musicObjects.size())
+        {
+            return nullptr;
+        }
+        return musicObjects[index];
+    }
+};
+
+class Player
+{
+    Playlist playlist;
+
+public:
+    Player(Playlist &_playlist) : playlist(_playlist) {}
+
     int start()
     {
         while (true)
         {
-
             int choice = 0;
-            musicInput.printList();
+            playlist.printList();
             cout << "Enter the number of the music file you want to play (or -1 to exit): ";
             cin >> choice;
 
@@ -244,15 +266,14 @@ public:
                 break;
             }
 
-            if (choice < 0 || choice >= musicFiles.size())
+            Music *music = playlist.getMusic(choice);
+            if (!music)
             {
                 cerr << "Invalid choice. Please try again." << endl;
                 continue;
             }
 
-            Music music = *musicObjects[choice];
-            music.play();
-            // Initialize SDL
+            music->play();
         }
 
         return 0;
@@ -266,7 +287,8 @@ int main()
     cin >> folderPath;
 
     auto musicInput = MusicInput();
-    musicInput.fetchMusicList("musics");
-    Player music(musicInput);
-    return music.start();
+    musicInput.fetchMusicList(folderPath);
+    Playlist playlist(musicInput.musicFiles);
+    Player player(playlist);
+    return player.start();
 }
