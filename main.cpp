@@ -18,28 +18,45 @@ atomic<bool> stopMusic(false);
 condition_variable cv;
 mutex mtx;
 
-vector<string> fetchMusicList(string folderPath)
+class MusicInput
 {
+public:
     vector<string> musicFiles;
-    for (const auto &entry : filesystem::directory_iterator(folderPath))
+
+    void fetchMusicList(string folderPath)
     {
-        if (entry.is_regular_file())
+        printf("folderPath = %s\n", folderPath.c_str());
+        vector<string> _musicFiles;
+        for (const auto &entry : filesystem::directory_iterator(folderPath))
         {
-            string filePath = entry.path().string();
-            // Check if the file is a music file (e.g., .mp3, .wav)
-            if (filePath.find(".mp3") != string::npos || filePath.find(".wav") != string::npos)
+            if (entry.is_regular_file())
             {
-                musicFiles.push_back(filePath);
+                string filePath = entry.path().string();
+                // Check if the file is a music file (e.g., .mp3, .wav)
+                if (filePath.find(".mp3") != string::npos || filePath.find(".wav") != string::npos)
+                {
+                    _musicFiles.push_back(filePath);
+                }
             }
         }
+        musicFiles = _musicFiles;
     }
-    return musicFiles;
-}
+
+    void printList()
+    {
+        cout << "Music Options: " << endl;
+        for (int i = 0; i < musicFiles.size(); i++)
+        {
+            cout << i << ". " << musicFiles[i] << endl;
+        }
+    };
+};
 
 class Music
 {
-    vector<string> musicFiles;
-    // Function to display the current timestamp
+
+public:
+    string filePath;
     static void displayTimestamp(Mix_Music *music)
     {
         int duration = Mix_MusicDuration(music);
@@ -81,7 +98,6 @@ class Music
         }
         cv.notify_one(); // Notify the main thread that the music has stopped
     }
-
     // Function to handle pause, resume, and stop
     static void handleInput()
     {
@@ -110,10 +126,10 @@ class Music
                 Mix_RewindMusic();
                 break;
 
-            case 'q':
-                stopMusic = true;
-                Mix_HaltMusic();
-                return;
+                // case 'q':
+                //     stopMusic = true;
+                //     Mix_HaltMusic();
+                //     return;
 
             default:
                 break;
@@ -121,28 +137,105 @@ class Music
         }
     }
 
-    void printMusicList(vector<string> musicFiles)
+public:
+    Music(string _filePath) : filePath(_filePath) {}
+
+    string getFilePath() const { return filePath; }
+
+    void displayInfo() const
     {
-        cout << "Music Options: " << endl;
-        for (int i = 0; i < musicFiles.size(); i++)
-        {
-            cout << i << ". " << musicFiles[i] << endl;
-        }
+        cout << "File Path: " << filePath << endl;
     }
 
-public:
-    Music(vector<string> _musicFiles)
+    void play()
     {
-        musicFiles = _musicFiles;
+        // Initialize SDL
+        if (SDL_Init(SDL_INIT_AUDIO) < 0)
+        {
+            cerr << "SDL_Init failed: " << SDL_GetError() << endl;
+            return;
+        }
+
+        // Initialize SDL_mixer
+        if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0)
+        {
+            cerr << "Mix_OpenAudio failed: " << Mix_GetError() << endl;
+            SDL_Quit();
+            return;
+        }
+
+        // Load the MP3 file
+        Mix_Music *music = Mix_LoadMUS(filePath.c_str());
+        if (!music)
+        {
+            cerr << "Mix_LoadMUS failed: " << Mix_GetError() << endl;
+            Mix_CloseAudio();
+            SDL_Quit();
+            return;
+        }
+
+        // Play the music
+        if (Mix_PlayMusic(music, 1) == -1)
+        {
+            cerr << "Mix_PlayMusic failed: " << Mix_GetError() << endl;
+            Mix_FreeMusic(music);
+            Mix_CloseAudio();
+            SDL_Quit();
+            return;
+        }
+
+        // Reset stopMusic flag
+        stopMusic = false;
+
+        // Start a thread to display the timestamp
+        thread timestampThread(displayTimestamp, music);
+
+        // Start a thread to handle user input
+        thread inputThread(handleInput);
+
+        // Wait for the music to finish playing or for stop signal
+        {
+            unique_lock<mutex> lk(mtx);
+            cv.wait(lk, []
+                    { return stopMusic.load(); });
+        }
+
+        // Clean up
+        Mix_FreeMusic(music);
+        Mix_CloseAudio();
+        SDL_Quit();
+
+        // Ensure threads are joined
+        timestampThread.join();
+        inputThread.join();
+    }
+};
+;
+
+class Player
+{
+    MusicInput musicInput;
+    vector<string> musicFiles;
+    vector<Music *> musicObjects;
+
+public:
+    Player(MusicInput &_musicInput)
+    {
+        musicInput = _musicInput;
+        musicFiles = _musicInput.musicFiles;
+        printf("musicFiles.size() = %d\n", musicFiles.size());
+        for (auto &file : musicFiles)
+        {
+            musicObjects.push_back(new Music(file));
+        }
     }
     int start()
     {
         while (true)
         {
-            printMusicList(musicFiles);
 
             int choice = 0;
-
+            musicInput.printList();
             cout << "Enter the number of the music file you want to play (or -1 to exit): ";
             cin >> choice;
 
@@ -157,67 +250,9 @@ public:
                 continue;
             }
 
-            auto filename = musicFiles[choice];
-
+            Music music = *musicObjects[choice];
+            music.play();
             // Initialize SDL
-            if (SDL_Init(SDL_INIT_AUDIO) < 0)
-            {
-                cerr << "SDL_Init failed: " << SDL_GetError() << endl;
-                return 1;
-            }
-
-            // Initialize SDL_mixer
-            if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0)
-            {
-                cerr << "Mix_OpenAudio failed: " << Mix_GetError() << endl;
-                SDL_Quit();
-                return 1;
-            }
-
-            // Load the MP3 file
-            Mix_Music *music = Mix_LoadMUS(filename.c_str());
-            if (!music)
-            {
-                cerr << "Mix_LoadMUS failed: " << Mix_GetError() << endl;
-                Mix_CloseAudio();
-                SDL_Quit();
-                return 1;
-            }
-
-            // Play the music
-            if (Mix_PlayMusic(music, 1) == -1)
-            {
-                cerr << "Mix_PlayMusic failed: " << Mix_GetError() << endl;
-                Mix_FreeMusic(music);
-                Mix_CloseAudio();
-                SDL_Quit();
-                return 1;
-            }
-
-            // Reset stopMusic flag
-            stopMusic = false;
-
-            // Start a thread to display the timestamp
-            thread timestampThread(displayTimestamp, music);
-
-            // Start a thread to handle user input
-            thread inputThread(handleInput);
-
-            // Wait for the music to finish playing or for stop signal
-            {
-                unique_lock<mutex> lk(mtx);
-                cv.wait(lk, []
-                        { return stopMusic.load(); });
-            }
-
-            // Clean up
-            Mix_FreeMusic(music);
-            Mix_CloseAudio();
-            SDL_Quit();
-
-            // Ensure threads are joined
-            timestampThread.join();
-            inputThread.join();
         }
 
         return 0;
@@ -226,7 +261,12 @@ public:
 
 int main()
 {
-    auto musics = fetchMusicList("musics");
-    Music music(musics);
+    string folderPath;
+    cout << "Enter the folder path containing music files: ";
+    cin >> folderPath;
+
+    auto musicInput = MusicInput();
+    musicInput.fetchMusicList("musics");
+    Player music(musicInput);
     return music.start();
 }
